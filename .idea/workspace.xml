@@ -30,12 +30,12 @@
     &quot;assignee&quot;: &quot;Smyles019&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings">{
-  &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;https://github.com/NDANUKL/nort_telegram.git&quot;,
-    &quot;accountId&quot;: &quot;48c6e109-d753-41c4-b404-aa1293d7af55&quot;
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/NDANUKL/nort_telegram.git",
+    "accountId": "598a645b-229a-45a9-9c5d-d48c09f4b68c"
   }
-}</component>
+}]]></component>
   <component name="McpProjectServerCommands">
     <commands />
     <urls />
@@ -59,7 +59,7 @@
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "WebServerToolWindowFactoryState": "false",
     "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "Merging feat/advice",
+    "git-widget-placeholder": "main",
     "junie.onboarding.icon.badge.shown": "true",
     "kotlin-language-version-configured": "true",
     "node.js.detected.package.eslint": "true",
@@ -99,7 +99,6 @@
     <attachedChunks>
       <set>
         <option value="bundled-jdk-30f59d01ecdd-2fc7cc6b9a17-intellij.indexing.shared.core-IU-253.30387.90" />
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-IU-253.30387.90" />
       </set>
     </attachedChunks>
   </component>
@@ -118,7 +117,8 @@
       <workItem from="1771921287146" duration="7342000" />
       <workItem from="1771936893457" duration="22528000" />
       <workItem from="1772042399599" duration="15580000" />
-      <workItem from="1772128058347" duration="5076000" />
+      <workItem from="1772128058347" duration="7889000" />
+      <workItem from="1772173520690" duration="7214000" />
     </task>
     <task id="LOCAL-00001" summary="Configured intern 3">
       <option name="closed" value="true" />
