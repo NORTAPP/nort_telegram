@@ -58,7 +58,7 @@ public class Bot extends TelegramLongPollingBot {
 
         String[] commandParts = messageText.split("\\s+");
         String command = commandParts[0].toLowerCase();
-        String lang = userLanguages.getOrDefault(chatId, "en");
+        String lang = getPreferredLanguage(chatId);
 
         switch (command) {
             case "/start":
@@ -230,7 +230,7 @@ public class Bot extends TelegramLongPollingBot {
             return;
         }
 
-        String marketId = pendingPremiumMarkets.get(chatId);
+        String marketId = getPendingPremiumMarket(chatId);
         if (marketId == null || marketId.isEmpty()) {
             sendText(chatId, "I do not have a pending premium request for you. Run /advice <market_id> first.");
             return;
@@ -382,14 +382,14 @@ public class Bot extends TelegramLongPollingBot {
             return;
         }
 
-        if (!autoTradeEnabled.getOrDefault(chatId, false)) {
+        if (!isAutoTradeEnabled(chatId)) {
             sendText(chatId, "Auto-trade is disabled. Enable it first with /enable_autotrade.");
             return;
         }
 
         String marketId = parts[2];
         String side = parts[3];
-        double limit = autoTradeLimits.getOrDefault(chatId, DEFAULT_AUTO_TRADE_AMOUNT);
+        double limit = getAutoTradeLimit(chatId);
         double amount = Math.min(DEFAULT_AUTO_TRADE_AMOUNT, limit);
 
         if (amount <= 0) {
@@ -560,6 +560,22 @@ public class Bot extends TelegramLongPollingBot {
             }
         } catch (Exception ignored) {
         }
+    }
+
+    private String getPreferredLanguage(long chatId) {
+        return userLanguages.getOrDefault(chatId, "en");
+    }
+
+    private String getPendingPremiumMarket(long chatId) {
+        return pendingPremiumMarkets.get(chatId);
+    }
+
+    private boolean isAutoTradeEnabled(long chatId) {
+        return autoTradeEnabled.getOrDefault(chatId, false);
+    }
+
+    private double getAutoTradeLimit(long chatId) {
+        return autoTradeLimits.getOrDefault(chatId, DEFAULT_AUTO_TRADE_AMOUNT);
     }
 
     public void sendMenu(long chatId) {
