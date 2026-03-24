@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
@@ -42,8 +43,7 @@ public class BackendClient {
                 .post(body)
                 .build();
         try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) return "Error " + response.code();
-            return response.body().string();
+            return readResponseBody(response);
         } catch (IOException e) {
             return "Connection failed.";
         }
@@ -93,8 +93,7 @@ public class BackendClient {
     private String fetch(String url) {
         Request request = new Request.Builder().url(url).build();
         try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) return "Error " + response.code();
-            return response.body().string();
+            return readResponseBody(response);
         } catch (IOException e) {
             return "Connection failed.";
         }
@@ -104,10 +103,23 @@ public class BackendClient {
         RequestBody body = RequestBody.create(jsonBody, JSON);
         Request request = new Request.Builder().url(url).post(body).build();
         try (Response response = client.newCall(request).execute()) {
-            if (!response.isSuccessful()) return "Error " + response.code();
-            return response.body().string();
+            return readResponseBody(response);
         } catch (IOException e) {
             return "Connection failed.";
         }
+    }
+
+    private String readResponseBody(Response response) throws IOException {
+        ResponseBody body = response.body();
+        if (body == null) {
+            return "Error " + response.code();
+        }
+
+        String payload = body.string();
+        if (payload == null || payload.trim().isEmpty()) {
+            return "Error " + response.code();
+        }
+
+        return payload;
     }
 }
