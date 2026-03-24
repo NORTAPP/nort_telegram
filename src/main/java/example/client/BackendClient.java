@@ -22,31 +22,17 @@ public class BackendClient {
         this.baseUrl = "https://nort.onrender.com";
     }
 
-    // ─────────────────────────────────────────────
-    // INTERN 1 — Market Data
-    // ─────────────────────────────────────────────
-
     public String getTrendingMarkets() {
-        return fetch(baseUrl + "/markets?limit=10&sort_by=volume&category=crypto"); // Top 10 crypto markets sorted by volume
+        return fetch(baseUrl + "/markets?limit=10&sort_by=volume&category=crypto");
     }
 
     public String getMarkets() {
         return fetch(baseUrl + "/markets?limit=50");
     }
 
-    // ─────────────────────────────────────────────
-    // INTERN 2 — Signals Engine
-    // ─────────────────────────────────────────────
-
     public String getSignals() {
         return fetch(baseUrl + "/signals?top=10");
     }
-
-    // ─────────────────────────────────────────────
-    // INTERN 3 — OpenClaw AI Agent
-    // POST /agent/advice          → free AI advice
-    // POST /agent/advice (premium)→ premium advice (x402 gated)
-    // ─────────────────────────────────────────────
 
     public String getAIAdvice(String marketId) {
         String json = String.format("{\"market_id\":\"%s\",\"telegram_id\":null}", marketId);
@@ -63,38 +49,31 @@ public class BackendClient {
         }
     }
 
-    public String getPremiumAdvice(String marketId, long chatId) {
+    // UPDATED: supports language parameter
+    public String getPremiumAdvice(String marketId, long chatId, String language) {
+        String langJson = (language != null && !language.isEmpty()) ? String.format(", \"language\":\"%s\"", language) : "";
         String json = String.format(
-            "{\"market_id\":\"%s\", \"telegram_id\":\"%d\", \"premium\":true}",
-            marketId, chatId
+                "{\"market_id\":\"%s\", \"telegram_id\":\"%d\", \"premium\":true%s}",
+                marketId, chatId, langJson
         );
         return post(baseUrl + "/agent/advice", json);
     }
 
-    // ─────────────────────────────────────────────
-    // INTERN 4 — x402 Payment Verification
-    // POST /agent/x402/verify → verify payment proof
-    // ─────────────────────────────────────────────
-
     public String verifyPayment(String proof, long chatId) {
         String json = String.format(
-            "{\"proof\":\"%s\", \"user_id\":\"%d\"}",
-            proof, chatId
+                "{\"proof\":\"%s\", \"user_id\":\"%d\"}",
+                proof, chatId
         );
         return post(baseUrl + "/agent/x402/verify", json);
     }
-
-    // ─────────────────────────────────────────────
-    // INTERN 5 — Paper Trading + Wallet
-    // ─────────────────────────────────────────────
 
     public String placePaperTrade(long chatId, String marketId, String side, double amount) {
         double pricePerShare = 0.5;
         double shares = amount / pricePerShare;
         String outcome = side.toUpperCase();
         String json = String.format(
-            "{\"telegram_user_id\":%d,\"market_id\":\"%s\",\"outcome\":\"%s\",\"shares\":%.2f,\"price_per_share\":%.2f}",
-            chatId, marketId, outcome, shares, pricePerShare
+                "{\"telegram_user_id\":%d,\"market_id\":\"%s\",\"outcome\":\"%s\",\"shares\":%.2f,\"price_per_share\":%.2f}",
+                chatId, marketId, outcome, shares, pricePerShare
         );
         return post(baseUrl + "/papertrade", json);
     }
@@ -103,9 +82,13 @@ public class BackendClient {
         return fetch(baseUrl + "/wallet/summary?telegram_user_id=" + chatId);
     }
 
-    // ─────────────────────────────────────────────
-    // PRIVATE HELPERS
-    // ─────────────────────────────────────────────
+    // NEW: Permissions route POST /permissions
+    public String updatePermissions(long chatId, Boolean autoTrade, Double limit) {
+        String autoTradeStr = (autoTrade != null) ? String.valueOf(autoTrade) : "null";
+        String limitStr = (limit != null) ? String.valueOf(limit) : "null";
+        String json = String.format("{\"telegram_user_id\":%d, \"auto_trade\":%s, \"limit\":%s}", chatId, autoTradeStr, limitStr);
+        return post(baseUrl + "/permissions", json);
+    }
 
     private String fetch(String url) {
         Request request = new Request.Builder().url(url).build();

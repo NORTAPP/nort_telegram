@@ -12,10 +12,15 @@ import org.json.JSONArray;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Bot extends TelegramLongPollingBot {
 
     private final BackendClient backend = new BackendClient();
+
+    // In-memory language preference state
+    private final Map<Long, String> userLanguages = new ConcurrentHashMap<>();
 
     @Override
     public String getBotUsername() {
@@ -37,14 +42,14 @@ public class Bot extends TelegramLongPollingBot {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
 
-            // x402: intercept 64-char hex tx hash replies before command parsing
             if (messageText.matches("[0-9a-fA-F]{64}")) {
                 String verifyResult = backend.verifyPayment(messageText, chatId);
                 try {
                     JSONObject verifyJson = new JSONObject(verifyResult);
                     if (verifyJson.getBoolean("success")) {
                         sendText(chatId, "✅ Payment verified! Unlocking premium advice...");
-                        String unlocked = backend.getPremiumAdvice("last_market_id", chatId);
+                        String lang = userLanguages.getOrDefault(chatId, "en");
+                        String unlocked = backend.getPremiumAdvice("last_market_id", chatId, lang);
                         JSONObject unlockedJson = new JSONObject(unlocked);
                         sendText(chatId, "💎 *Premium Content:*\n" + unlockedJson.getString("content"));
                     } else {
@@ -56,14 +61,57 @@ public class Bot extends TelegramLongPollingBot {
                 return;
             }
 
-            String command = messageText.split(" ")[0];
+            String[] commandParts = messageText.split(" ");
+            String command = commandParts[0].toLowerCase();
+            String lang = userLanguages.getOrDefault(chatId, "en");
 
             switch (command) {
                 case "/start":
                     sendMenu(chatId);
                     break;
 
-                // ── UPDATED: formats top 10 instead of dumping raw JSON ──
+                case "/lang":
+                case "/language":
+                    if (commandParts.length < 2) {
+                        sendLanguageMenu(chatId);
+                    } else {
+                        String newLang = commandParts[1].toLowerCase();
+                        if (newLang.equals("sw") || newLang.equals("en")) {
+                            userLanguages.put(chatId, newLang);
+                            sendText(chatId, "Language updated to: " + (newLang.equals("sw") ? "Kiswahili" : "English"));
+                        } else {
+                            sendText(chatId, "Unsupported language. Use '/lang en' or '/lang sw'.");
+                        }
+                    }
+                    break;
+
+                case "/enable_autotrade":
+                    sendText(chatId, "Enabling auto-trade permissions...");
+                    String enableRes = backend.updatePermissions(chatId, true, null);
+                    sendText(chatId, "Result:\n" + enableRes);
+                    break;
+
+                case "/disable_autotrade":
+                    sendText(chatId, "Disabling auto-trade permissions...");
+                    String disableRes = backend.updatePermissions(chatId, false, null);
+                    sendText(chatId, "Result:\n" + disableRes);
+                    break;
+
+                case "/set_limit":
+                    if (commandParts.length < 2) {
+                        sendText(chatId, "Usage: /set_limit <amount>\nExample: /set_limit 100");
+                    } else {
+                        try {
+                            double limit = Double.parseDouble(commandParts[1]);
+                            sendText(chatId, "Setting auto-trade limit to $" + limit + "...");
+                            String limitRes = backend.updatePermissions(chatId, null, limit);
+                            sendText(chatId, "Result:\n" + limitRes);
+                        } catch (NumberFormatException e) {
+                            sendText(chatId, "Invalid amount. Please use numbers only.");
+                        }
+                    }
+                    break;
+
                 case "/trending":
                     sendText(chatId, "Fetching top 10 trending markets...");
                     String trendingRaw = backend.getTrendingMarkets();
@@ -95,15 +143,13 @@ public class Bot extends TelegramLongPollingBot {
                     break;
 
                 case "/advice":
-                    String[] adviceParts = messageText.split(" ");
-                    if (adviceParts.length < 2) {
+                    if (commandParts.length < 2) {
                         sendText(chatId, "Usage: /advice <market_id>\nExample: /advice 527079");
                     } else {
-                        String mktId = adviceParts[1];
-                        sendText(chatId, "Analyzing market " + mktId + "...");
-                        String premiumResponse = backend.getPremiumAdvice(mktId, chatId);
+                        String mktId = commandParts[1];
+                        sendText(chatId, "Analyzing market " + mktId + " (" + (lang.equals("sw") ? "Kiswahili" : "English") + ")...");
+                        String premiumResponse = backend.getPremiumAdvice(mktId, chatId, lang);
 
-                        // Guard: backend unavailable
                         if (premiumResponse.contains("503") || premiumResponse.startsWith("Connection failed") || premiumResponse.startsWith("Error 5")) {
                             sendText(chatId, "⚠️ The backend is currently waking up or unavailable. Please wait 30 seconds and try again.");
                             break;
@@ -112,7 +158,6 @@ public class Bot extends TelegramLongPollingBot {
                         try {
                             JSONObject json = new JSONObject(premiumResponse);
 
-                            // Structured advice response
                             if (json.has("summary")) {
                                 String marketId  = json.optString("market_id", mktId);
                                 String summary   = json.optString("summary", "");
@@ -144,14 +189,21 @@ public class Bot extends TelegramLongPollingBot {
                                 if (!staleWarn.isEmpty())
                                     msg.append("\n⚠️ DATA WARNING: ").append(staleWarn).append("\n");
                                 msg.append("\n═══════════════════════\n_").append(disclaimer).append("_");
-                                sendText(chatId, msg.toString());
 
+                                // Show Execution Confirmation if recommended plan contains actionable side (YES/NO/BUY/SELL)
+                                if (!plan.toUpperCase().contains("WAIT")) {
+                                    String side = "YES";
+                                    if (plan.toUpperCase().contains("NO") || plan.toUpperCase().contains("SELL")) {
+                                        side = "NO";
+                                    }
+                                    sendAdviceWithExecuteOption(chatId, msg.toString(), mktId, side);
+                                } else {
+                                    sendText(chatId, msg.toString());
+                                }
                             } else {
                                 sendText(chatId, "💎 *Premium Content:*\n" + json.getString("content"));
                             }
-
                         } catch (Exception e) {
-                            // Check if it's a 402 payment required response
                             if (premiumResponse.contains("402") || premiumResponse.contains("PAYMENT-REQUIRED")) {
                                 try {
                                     JSONObject paymentJson = new JSONObject(premiumResponse);
@@ -188,7 +240,6 @@ public class Bot extends TelegramLongPollingBot {
                     sendText(chatId, "LIVE MARKETS\n═══════════════════════\n\n" + rawMarkets);
                     break;
 
-                // ── UPDATED: formats top 10 instead of dumping raw JSON ──
                 case "/signals":
                     sendText(chatId, "Analyzing market momentum...");
                     String signalsRaw = backend.getSignals();
@@ -229,15 +280,14 @@ public class Bot extends TelegramLongPollingBot {
                     break;
 
                 case "/papertrade":
-                    String[] parts = messageText.split(" ");
-                    if (parts.length < 4) {
+                    if (commandParts.length < 4) {
                         sendText(chatId, "PAPER TRADE ORDER\n═══════════════════════\n" +
                                 "Usage: /papertrade <market_id> <yes/no> <amount>\n" +
                                 "Example: /papertrade 527079 yes 50\n\n" +
                                 "Simulates trades without real money risk.");
                     } else {
                         try {
-                            String result = backend.placePaperTrade(chatId, parts[1], parts[2], Double.parseDouble(parts[3]));
+                            String result = backend.placePaperTrade(chatId, commandParts[1], commandParts[2], Double.parseDouble(commandParts[3]));
                             sendText(chatId, "PAPER TRADE EXECUTED\n═══════════════════════\n\n" + result);
                         } catch (NumberFormatException e) {
                             sendText(chatId, "Invalid amount. Please use numbers only (e.g. 50, 100.50).");
@@ -253,7 +303,12 @@ public class Bot extends TelegramLongPollingBot {
                             "• /signals - Algorithmic trading signals\n" +
                             "• /markets - Live market listings\n" +
                             "• /portfolio - Paper trading summary\n" +
-                            "• /papertrade <id> yes/no <amount> - Simulate trades\n\n" +
+                            "• /papertrade <id> yes/no <amount> - Simulate trades\n" +
+                            "• /lang - Set your preferred language (en/sw)\n\n" +
+                            "Settings:\n" +
+                            "• /enable_autotrade - Enable automated AI trading execution\n" +
+                            "• /disable_autotrade - Disable automated trading\n" +
+                            "• /set_limit <$amount> - Set auto-trade execution limit\n\n" +
                             "Type /start for interactive menu.");
             }
         }
@@ -263,45 +318,69 @@ public class Bot extends TelegramLongPollingBot {
             String callData = update.getCallbackQuery().getData();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
 
-            switch (callData) {
-                case "btn_trending":
-                    String trendingRaw2 = backend.getTrendingMarkets();
-                    try {
-                        JSONObject trendingJson2 = new JSONObject(trendingRaw2);
-                        JSONArray markets2 = trendingJson2.getJSONArray("markets");
-                        StringBuilder trending2 = new StringBuilder();
-                        trending2.append("TOP 10 TRENDING MARKETS\n");
-                        trending2.append("═══════════════════════════════════════\n\n");
-                        for (int i = 0; i < markets2.length(); i++) {
-                            JSONObject m    = markets2.getJSONObject(i);
-                            String mid      = m.optString("id", "?");
-                            String question = m.optString("question", "Unknown");
-                            double volume   = m.optDouble("volume", 0);
-                            double odds     = m.optDouble("current_odds", 0);
-                            String expires  = m.optString("expires_at", "?").split(" ")[0];
-                            String oddsStr  = odds > 0 ? String.format("%.0f%%", odds * 100) : "-";
-                            trending2.append(String.format("%d. %s\n", i + 1, question));
-                            trending2.append(String.format("   ID: %s  |  $%,.0f  |  %s  |  %s\n\n", mid, volume, oddsStr, expires));
+            if (callData.startsWith("lang_")) {
+                String newLang = callData.substring(5);
+                userLanguages.put(chatId, newLang);
+                sendText(chatId, "Language updated to: " + (newLang.equals("sw") ? "Kiswahili" : "English"));
+            }
+            else if (callData.startsWith("exe_yes_")) {
+                // Format: exe_yes_<marketId>_<side>
+                String[] parts = callData.split("_");
+                if (parts.length >= 4) {
+                    String mktId = parts[2];
+                    String side = parts[3];
+                    // Using default limit of 50$ for auto execution demo
+                    double amount = 50.0;
+                    sendText(chatId, "Executing trade... Placing $" + amount + " on " + side + " for market " + mktId);
+                    String result = backend.placePaperTrade(chatId, mktId, side, amount);
+                    sendText(chatId, "Trade Result:\n" + result);
+                }
+            }
+            else if (callData.equals("exe_no")) {
+                sendText(chatId, "Trade auto-execution cancelled.");
+            }
+            else {
+                // Existing callbacks
+                switch (callData) {
+                    case "btn_trending":
+                        String trendingRaw2 = backend.getTrendingMarkets();
+                        try {
+                            JSONObject trendingJson2 = new JSONObject(trendingRaw2);
+                            JSONArray markets2 = trendingJson2.getJSONArray("markets");
+                            StringBuilder trending2 = new StringBuilder();
+                            trending2.append("TOP 10 TRENDING MARKETS\n");
+                            trending2.append("═══════════════════════════════════════\n\n");
+                            for (int i = 0; i < markets2.length(); i++) {
+                                JSONObject m    = markets2.getJSONObject(i);
+                                String mid      = m.optString("id", "?");
+                                String question = m.optString("question", "Unknown");
+                                double volume   = m.optDouble("volume", 0);
+                                double odds     = m.optDouble("current_odds", 0);
+                                String expires  = m.optString("expires_at", "?").split(" ")[0];
+                                String oddsStr  = odds > 0 ? String.format("%.0f%%", odds * 100) : "-";
+                                trending2.append(String.format("%d. %s\n", i + 1, question));
+                                trending2.append(String.format("   ID: %s  |  $%,.0f  |  %s  |  %s\n\n", mid, volume, oddsStr, expires));
+                            }
+                            trending2.append("Use /advice <id> for a full AI analysis.");
+                            sendText(chatId, trending2.toString());
+                        } catch (Exception e) {
+                            sendText(chatId, "Unable to retrieve trending markets at this time.");
                         }
-                        trending2.append("Use /advice <id> for a full AI analysis.");
-                        sendText(chatId, trending2.toString());
-                    } catch (Exception e) {
-                        sendText(chatId, "Unable to retrieve trending markets at this time.");
-                    }
-                    break;
+                        break;
 
-                case "btn_advice":
-                    sendText(chatId, "AI ADVICE\n═════════════\n" +
-                            "Usage: /advice <market_id>\n" +
-                            "Example: /advice 527079\n\n" +
-                            "Get detailed AI-powered analysis for any market.");
-                    break;
+                    case "btn_advice":
+                        sendText(chatId, "AI ADVICE\n═════════════\n" +
+                                "Usage: /advice <market_id>\n" +
+                                "Example: /advice 527079\n\n" +
+                                "Get detailed AI-powered analysis for any market.");
+                        break;
 
-                case "btn_portfolio":
-                    sendText(chatId, "PORTFOLIO SUMMARY (Paper Trading Mode)\n" +
-                            "═══════════════════════════════════════\n" +
-                            "Account Balance: $1,000.00\nActive Positions: 0\nTotal PNL: $0.00");
-                    break;
+                    case "btn_portfolio":
+                        String summary = backend.getWalletSummary(chatId);
+                        sendText(chatId, "PORTFOLIO SUMMARY\n" +
+                                "═══════════════════════════════════════\n" + summary);
+                        break;
+                }
             }
         }
     }
@@ -315,7 +394,7 @@ public class Bot extends TelegramLongPollingBot {
                         "• AI reasoning engine\n" +
                         "• Web intelligence gathering\n\n" +
                         "Paper trading environment - risk-free strategy testing\n\n" +
-                        "Commands: /advice /signals /trending /portfolio")
+                        "Commands: /advice /signals /trending /portfolio /lang")
                 .build();
 
         InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
@@ -328,8 +407,13 @@ public class Bot extends TelegramLongPollingBot {
         List<InlineKeyboardButton> row2 = new ArrayList<>();
         row2.add(InlineKeyboardButton.builder().text("Portfolio").callbackData("btn_portfolio").build());
 
+        List<InlineKeyboardButton> row3 = new ArrayList<>();
+        row3.add(InlineKeyboardButton.builder().text("🌎 Set Language").callbackData("lang_sw").build()); // Can change default behavior
+
         rowsInline.add(row1);
         rowsInline.add(row2);
+        rowsInline.add(row3);
+
         markupInline.setKeyboard(rowsInline);
         sm.setReplyMarkup(markupInline);
 
@@ -340,8 +424,55 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
+    public void sendLanguageMenu(long chatId) {
+        SendMessage sm = SendMessage.builder()
+                .chatId(String.valueOf(chatId))
+                .text("Select your preferred language / Chagua lugha unayopendelea:")
+                .build();
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+        List<InlineKeyboardButton> row1 = new ArrayList<>();
+        row1.add(InlineKeyboardButton.builder().text("English").callbackData("lang_en").build());
+        row1.add(InlineKeyboardButton.builder().text("Kiswahili").callbackData("lang_sw").build());
+        rowsInline.add(row1);
+        markupInline.setKeyboard(rowsInline);
+        sm.setReplyMarkup(markupInline);
+
+        try {
+            execute(sm);
+        } catch (TelegramApiException e) {
+            System.err.println("Failed to send language menu: " + e.getMessage());
+        }
+    }
+
+    public void sendAdviceWithExecuteOption(long chatId, String text, String marketId, String side) {
+        if (text.length() > 4096) text = text.substring(0, 4090) + "\n[...]";
+
+        SendMessage sm = SendMessage.builder()
+                .chatId(String.valueOf(chatId))
+                .text(text + "\n\n🚀 Auto-execute this trade?")
+                .build();
+
+        InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+        List<InlineKeyboardButton> row1 = new ArrayList<>();
+
+        row1.add(InlineKeyboardButton.builder().text("✅ Yes").callbackData("exe_yes_" + marketId + "_" + side).build());
+        row1.add(InlineKeyboardButton.builder().text("❌ No").callbackData("exe_no").build());
+
+        rowsInline.add(row1);
+        markupInline.setKeyboard(rowsInline);
+        sm.setReplyMarkup(markupInline);
+
+        try {
+            execute(sm);
+        } catch (TelegramApiException e) {
+            System.err.println("Failed to send execution option: " + e.getMessage());
+        }
+    }
+
     public void sendText(long chatId, String text) {
-        // Telegram enforces a 4096 character limit per message
         if (text.length() > 4096) {
             text = text.substring(0, 4090) + "\n[...]";
         }
